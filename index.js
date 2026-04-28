@@ -3,15 +3,122 @@ if (!Object.hasOwn) {
     Object.prototype.hasOwnProperty.call(Object(target), property);
 }
 
+const fs = require("fs");
+const https = require("https");
+const path = require("path");
+const { spawnSync } = require("child_process");
 const express = require("express");
 const cors = require("cors");
 const ndef = require("ndef");
+const { attachSocketServer } = require("./socket-server");
 
 const app = express();
-app.use(cors());
+const ALLOWED_CORS_ORIGINS = new Set([
+  "https://peradiprof.or.id",
+  "https://www.peradiprof.or.id",
+  "https://localhost:43125",
+  "https://127.0.0.1:43125"
+]);
+
+function applyCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_CORS_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    req.headers["access-control-request-headers"] || "Content-Type"
+  );
+
+  if (req.headers["access-control-request-private-network"] === "true") {
+    res.setHeader("Access-Control-Allow-Private-Network", "true");
+  }
+}
+
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res);
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || ALLOWED_CORS_ORIGINS.has(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`Origin not allowed: ${origin}`));
+  }
+}));
 app.use(express.json());
 
 const PORT = 43125;
+const CERT_DIR = path.join(__dirname, ".cert");
+const HTTPS_PFX_PATH = path.join(CERT_DIR, "localhost-dev.pfx");
+const HTTPS_CER_PATH = path.join(CERT_DIR, "localhost-dev.cer");
+const HTTPS_PASSPHRASE = process.env.NFC_HTTPS_PASSPHRASE || "nfc-localhost-dev";
+const HTTPS_CERT_FRIENDLY_NAME = "NFC Agent Localhost Dev";
+
+app.get("/", (req, res) => {
+  res.type("html").send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NFC Agent</title>
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 32px;
+        background: #f5f7fb;
+        color: #1f2937;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        background: #ffffff;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      }
+      h1 {
+        margin-top: 0;
+      }
+      code {
+        background: #eef2ff;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+      ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>NFC Agent</h1>
+      <p>Server is running on port ${PORT}.</p>
+      <p>Available endpoints:</p>
+      <ul>
+        <li><code>GET /health</code></li>
+        <li><code>POST /write</code></li>
+        <li><code>GET /read</code></li>
+        <li><code>GET /check</code></li>
+        <li><code>GET /fix-trailer</code></li>
+        <li><code>GET /reset</code></li>
+      </ul>
+    </main>
+  </body>
+</html>`);
+});
 
 const BLOCK_SIZE = 16;
 const BLOCKS_PER_SECTOR = 4;
@@ -77,9 +184,33 @@ const NFC_DATA_AUTH = [
 let readerDevice = null;
 let nfc = null;
 let nfcInitialized = false;
+let nfcInitStarted = false;
+let nfcStatus = {
+  state: "idle",
+  error: null
+};
+let socketBridge = null;
 
 function buildSectorTrailer(keyA, accessBits, gpb, keyB) {
   return Buffer.concat([keyA, accessBits, Buffer.from([gpb]), keyB]);
+}
+
+function getHealthSnapshot() {
+  return {
+    ok: true,
+    nfcState: nfcStatus.state,
+    nfcError: nfcStatus.error,
+    readerConnected: !!readerDevice,
+    readerName: readerDevice ? readerDevice.name : null
+  };
+}
+
+function emitSocketStatus() {
+  socketBridge?.broadcastStatus();
+}
+
+function emitSocketEvent(eventName, payload) {
+  socketBridge?.broadcastEvent(eventName, payload);
 }
 
 function ensureNfcInitialized() {
@@ -87,10 +218,26 @@ function ensureNfcInitialized() {
     return nfc;
   }
 
+  if (nfcInitStarted) {
+    return nfc;
+  }
+
+  nfcInitStarted = true;
+  nfcStatus = {
+    state: "initializing",
+    error: null
+  };
+  emitSocketStatus();
+
   let NFC;
   try {
     ({ NFC } = require("nfc-pcsc"));
   } catch (err) {
+    nfcStatus = {
+      state: "error",
+      error: err.message
+    };
+    emitSocketStatus();
     if (err.code === "ERR_DLOPEN_FAILED") {
       throw new Error(
         `Failed to load nfc-pcsc native module. Current Node runtime is ${process.arch} on ${process.platform}. Rebuild/install the addon for this architecture.`
@@ -99,18 +246,36 @@ function ensureNfcInitialized() {
     throw err;
   }
 
+  console.log("[NFC] Initializing PC/SC context...");
   nfc = new NFC();
+  console.log("[NFC] PC/SC context created");
 
   nfc.on("reader", reader => {
     console.log("Reader detected:", reader.name);
     readerDevice = reader;
+    nfcStatus = {
+      state: "ready",
+      error: null
+    };
+    emitSocketStatus();
+    emitSocketEvent("nfc:reader", { connected: true, readerName: reader.name });
 
     reader.on("card", card => {
       console.log("Card detected:", card.uid);
+      emitSocketEvent("nfc:card", {
+        present: true,
+        uid: card.uid,
+        readerName: reader.name
+      });
     });
 
     reader.on("card.off", card => {
       console.log("Card removed:", card.uid);
+      emitSocketEvent("nfc:card", {
+        present: false,
+        uid: card.uid,
+        readerName: reader.name
+      });
     });
 
     reader.on("end", () => {
@@ -118,13 +283,27 @@ function ensureNfcInitialized() {
         readerDevice = null;
       }
       console.log("Reader removed:", reader.name);
+      emitSocketStatus();
+      emitSocketEvent("nfc:reader", { connected: false, readerName: reader.name });
     });
 
     reader.on("error", err => console.error("Reader error", err));
   });
 
-  nfc.on("error", err => console.error("NFC error", err));
+  nfc.on("error", err => {
+    nfcStatus = {
+      state: "error",
+      error: err.message
+    };
+    emitSocketStatus();
+    console.error("NFC error", err);
+  });
   nfcInitialized = true;
+  nfcStatus = {
+    state: "ready",
+    error: null
+  };
+  emitSocketStatus();
 
   return nfc;
 }
@@ -169,6 +348,55 @@ function createNdefMessage(url) {
     normalizedUrl,
     ndefMessage: Buffer.from(ndef.encodeMessage(records))
   };
+}
+
+function ensureLocalhostCertificate() {
+  fs.mkdirSync(CERT_DIR, { recursive: true });
+
+  const psScript = `
+$ErrorActionPreference = 'Stop'
+$certPath = '${HTTPS_PFX_PATH.replace(/'/g, "''")}'
+$cerPath = '${HTTPS_CER_PATH.replace(/'/g, "''")}'
+$password = ConvertTo-SecureString '${HTTPS_PASSPHRASE.replace(/'/g, "''")}' -AsPlainText -Force
+$existing = Get-ChildItem Cert:\\CurrentUser\\My |
+  Where-Object { $_.FriendlyName -eq '${HTTPS_CERT_FRIENDLY_NAME.replace(/'/g, "''")}' } |
+  Sort-Object NotAfter -Descending |
+  Select-Object -First 1
+if (-not $existing) {
+  $existing = New-SelfSignedCertificate -Subject 'CN=localhost' -CertStoreLocation 'Cert:\\CurrentUser\\My' -FriendlyName '${HTTPS_CERT_FRIENDLY_NAME.replace(/'/g, "''")}' -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1')
+}
+Export-PfxCertificate -Cert $existing.PSPath -FilePath $certPath -Password $password | Out-Null
+Export-Certificate -Cert $existing.PSPath -FilePath $cerPath -Type CERT | Out-Null
+$trusted = Get-ChildItem Cert:\\CurrentUser\\Root |
+  Where-Object { $_.Thumbprint -eq $existing.Thumbprint } |
+  Select-Object -First 1
+if (-not $trusted) {
+  Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null
+}
+`;
+
+  const result = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript], {
+    encoding: "utf8",
+    windowsHide: true
+  });
+
+  if (result.status !== 0 || !fs.existsSync(HTTPS_PFX_PATH)) {
+    throw new Error(
+      `Failed to create localhost HTTPS certificate.${result.stderr ? ` ${result.stderr.trim()}` : ""}`
+    );
+  }
+}
+
+function createHttpsServer() {
+  ensureLocalhostCertificate();
+
+  return https.createServer(
+    {
+      pfx: fs.readFileSync(HTTPS_PFX_PATH),
+      passphrase: HTTPS_PASSPHRASE
+    },
+    app
+  );
 }
 
 function createTlv(ndefMessage) {
@@ -748,17 +976,22 @@ app.get("/reset", async (req, res) => {
 });
 
 app.get("/health", (req, res) => {
-  res.json({
-    ok: true,
-    readerConnected: !!readerDevice,
-    readerName: readerDevice ? readerDevice.name : null
-  });
+  res.json(getHealthSnapshot());
 });
 
 function startServer() {
-  ensureNfcInitialized();
+  const server = createHttpsServer();
+  socketBridge = attachSocketServer(server, {
+    allowedOrigins: ALLOWED_CORS_ORIGINS,
+    getHealthSnapshot,
+    getReaderDevice: () => readerDevice,
+    getNfcStatus: () => nfcStatus,
+    inspectCard,
+    resetCard,
+    writeUrlToCard
+  });
 
-  app.listen(PORT, () => {
+  server.listen(PORT, () => {
     console.log(`\n✅ NFC Agent Running on http://localhost:${PORT}`);
     console.log(`\n📌 MIFARE Classic 1K NDEF endpoints`);
     console.log(`   POST /write         - Format card correctly and write URL as NDEF`);
@@ -768,12 +1001,28 @@ function startServer() {
     console.log(`   GET  /reset         - Reset card to transport/default layout`);
     console.log(`\n🚀 Test with:`);
     console.log(
-      `   curl -X POST http://localhost:${PORT}/write -H "Content-Type: application/json" -d '{"url":"https://peradipro.com"}'`
+      `   curl -k -X POST https://localhost:${PORT}/write -H "Content-Type: application/json" -d '{"url":"https://peradipro.com"}'`
     );
-    console.log(`   curl http://localhost:${PORT}/read`);
-    console.log(`   curl http://localhost:${PORT}/check`);
+    console.log(`   curl -k https://localhost:${PORT}/read`);
+    console.log(`   curl -k https://localhost:${PORT}/check`);
+    console.log(`   socket.io https://localhost:${PORT}/socket.io/`);
     console.log(`\nℹ️  Browser chooser/open is decided by Android, not by the ACR122U writer.`);
   });
+
+  setImmediate(() => {
+    try {
+      ensureNfcInitialized();
+    } catch (err) {
+      nfcStatus = {
+        state: "error",
+        error: err.message
+      };
+      emitSocketStatus();
+      console.error("[NFC] Initialization failed:", err.message);
+    }
+  });
+
+  return server;
 }
 
 if (require.main === module) {

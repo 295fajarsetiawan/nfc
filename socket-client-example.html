@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NFC Socket Client Example</title>
+  </head>
+  <body>
+    <h1>NFC Socket Client Example</h1>
+    <pre id="log"></pre>
+
+    <script src="https://127.0.0.1:43125/socket.io/socket.io.js"></script>
+    <script>
+      const log = document.getElementById("log");
+      const append = value => {
+        log.textContent += `${value}\n`;
+      };
+
+      const socket = io("https://127.0.0.1:43125", {
+        transports: ["websocket", "polling"]
+      });
+
+      socket.on("connect", () => {
+        append(`connected: ${socket.id}`);
+
+        socket.emit("health:get", response => {
+          append(`health: ${JSON.stringify(response)}`);
+        });
+      });
+
+      socket.on("nfc:health", payload => {
+        append(`nfc:health ${JSON.stringify(payload)}`);
+      });
+
+      socket.on("nfc:reader", payload => {
+        append(`nfc:reader ${JSON.stringify(payload)}`);
+      });
+
+      socket.on("nfc:card", payload => {
+        append(`nfc:card ${JSON.stringify(payload)}`);
+      });
+
+      window.writeUrl = url =>
+        socket.emit("nfc:write", { url }, response => {
+          append(`nfc:write ${JSON.stringify(response)}`);
+        });
+
+      window.readCard = () =>
+        socket.emit("nfc:read", response => {
+          append(`nfc:read ${JSON.stringify(response)}`);
+        });
+
+      window.checkCard = () =>
+        socket.emit("nfc:check", response => {
+          append(`nfc:check ${JSON.stringify(response)}`);
+        });
+
+      window.resetCard = () =>
+        socket.emit("nfc:reset", response => {
+          append(`nfc:reset ${JSON.stringify(response)}`);
+        });
+    </script>
+  </body>
+</html>

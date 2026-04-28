@@ -25,3 +25,4 @@
 *.log
 *.cache
 *.eslintcache
+.cert

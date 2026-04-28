@@ -1,6 +1,17 @@
-const { app, BrowserWindow } = require("electron");
+const electron = require("electron");
 const fs = require("fs");
+const https = require("https");
 const path = require("path");
+
+const SERVER_URL = "https://localhost:43125";
+const { app, BrowserWindow } =
+  typeof electron === "string" ? {} : electron;
+
+if (!app || !BrowserWindow) {
+  throw new Error(
+    "Electron API is unavailable. This usually means ELECTRON_RUN_AS_NODE is set. Clear that environment variable, then run npm start again."
+  );
+}
 
 function writeLog(message) {
   const logPath = path.join(app.getPath("userData"), "app.log");
@@ -8,7 +19,50 @@ function writeLog(message) {
   fs.appendFileSync(logPath, `[${time}] ${message}\n`);
 }
 
-app.whenReady().then(() => {
+async function waitForServerReady(url, timeoutMs = 15000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const request = https.get(
+          `${url}/health`,
+          {
+            rejectUnauthorized: false
+          },
+          res => {
+            res.resume();
+            resolve(res);
+          }
+        );
+
+        request.on("error", reject);
+      });
+
+      if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+        return;
+      }
+    } catch (err) {
+      writeLog(`Waiting for server: ${err.message}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Server did not become ready within ${timeoutMs}ms`);
+}
+
+app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
+  if (/^https:\/\/(localhost|127\.0\.0\.1):43125(?:\/|$)/i.test(url)) {
+    event.preventDefault();
+    callback(true);
+    return;
+  }
+
+  callback(false);
+});
+
+app.whenReady().then(async () => {
   writeLog("App started");
 
   try {
@@ -26,13 +80,17 @@ app.whenReady().then(() => {
     // loading dulu biar tidak blank
     win.loadURL("data:text/html,<h2>Starting NFC Agent...</h2>");
 
-    // kasih delay biar server ready
-    setTimeout(() => {
-      win.loadURL("http://localhost:43125");
-      writeLog("Server loaded in window");
-    }, 1500);
+    await waitForServerReady(SERVER_URL);
+    await win.loadURL(SERVER_URL);
+    writeLog("Server loaded in window");
 
   } catch (err) {
     writeLog("ERROR: " + err.stack);
+    const win = BrowserWindow.getAllWindows()[0];
+    if (win) {
+      win.loadURL(
+        `data:text/html,${encodeURIComponent(`<h2>NFC Agent gagal start</h2><pre>${err.message}</pre>`)}`
+      );
+    }
   }
 });

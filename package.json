@@ -16,6 +16,7 @@
     "files": [
       "main.js",
       "index.js",
+      "socket-server.js",
       "package.json",
       "node_modules/**/*"
     ],
@@ -38,7 +39,8 @@
     "cors": "^2.8.6",
     "express": "^5.2.1",
     "ndef": "^0.2.0",
-    "nfc-pcsc": "^0.8.1"
+    "nfc-pcsc": "^0.8.1",
+    "socket.io": "^4.8.3"
   },
   "devDependencies": {
     "electron": "^41.3.0",
