@@ -28,8 +28,6 @@
       "target": "nsis",
       "artifactName": "${productName}-Setup-${version}.exe"
     },
-
-    // 🔥 INI FIX UTAMA
     "asar": true,
     "asarUnpack": [
       "node_modules/nfc-pcsc/**/*",
