@@ -1,0 +1,85 @@
+name: Build Electron App
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: mac-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install deps
+        run: npm install
+
+      - name: Rebuild native modules
+        run: npx electron-rebuild -f -w nfc-pcsc
+
+      - name: Build DMG
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: List dist
+        run: ls -la dist
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-dmg
+          path: dist/*.dmg
+
+  build-win:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Python (node-gyp)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: win-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install deps
+        run: npm install
+
+      - name: Rebuild native modules
+        run: npx electron-rebuild -f -w nfc-pcsc
+
+      - name: Build EXE
+        run: npm run dist
+
+      - name: List dist
+        run: dir dist
+
+      - name: Upload EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe

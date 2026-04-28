@@ -3,24 +3,30 @@
   "version": "1.0.0",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "dist": "electron-builder"
+    "rebuild": "electron-rebuild -f -w nfc-pcsc",
+    "dist": "npm run rebuild && electron-builder"
   },
   "build": {
     "appId": "com.nfc.agent",
     "productName": "NFC Agent",
-    "win": {
-      "target": "nsis"
-    },
+    "files": [
+      "main.js",
+      "index.js",
+      "package.json",
+      "node_modules/**/*"
+    ],
     "mac": {
-      "target": "dmg"
-    }
+      "target": "dmg",
+      "category": "public.app-category.utilities",
+      "artifactName": "${productName}-${version}.dmg"
+    },
+    "win": {
+      "target": "nsis",
+      "artifactName": "${productName}-Setup-${version}.exe"
+    },
+    "asar": false
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^5.2.1",
