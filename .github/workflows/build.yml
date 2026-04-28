@@ -26,8 +26,13 @@ jobs:
       - name: Install deps
         run: npm install
 
+      # 🔥 WAJIB
       - name: Rebuild native modules
         run: npx electron-rebuild -f -w nfc-pcsc
+
+      # 🔥 WAJIB (INI YANG BELUM ADA DI PUNYAMU)
+      - name: Install app deps
+        run: npx electron-builder install-app-deps
 
       - name: Build DMG
         run: npm run dist
@@ -69,8 +74,13 @@ jobs:
       - name: Install deps
         run: npm install
 
+      # 🔥 WAJIB
       - name: Rebuild native modules
         run: npx electron-rebuild -f -w nfc-pcsc
+
+      # 🔥 WAJIB
+      - name: Install app deps
+        run: npx electron-builder install-app-deps
 
       - name: Build EXE
         run: npm run dist

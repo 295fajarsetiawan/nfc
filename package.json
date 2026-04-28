@@ -8,7 +8,7 @@
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w nfc-pcsc",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "npm run rebuild && electron-builder --publish=never"
+    "dist": "electron-builder --publish=never"
   },
   "build": {
     "appId": "com.nfc.agent",
@@ -28,7 +28,13 @@
       "target": "nsis",
       "artifactName": "${productName}-Setup-${version}.exe"
     },
-    "asar": false
+
+    // 🔥 INI FIX UTAMA
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/nfc-pcsc/**/*",
+      "node_modules/@pokusew/pcsclite/**/*"
+    ]
   },
   "dependencies": {
     "cors": "^2.8.6",
