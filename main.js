@@ -1,5 +1,6 @@
 const electron = require("electron");
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
 
 const SERVER_URL = "http://localhost:43125";
@@ -18,6 +19,33 @@ function writeLog(message) {
   fs.appendFileSync(logPath, `[${time}] ${message}\n`);
 }
 
+async function waitForServerReady(url, timeoutMs = 20000) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const response = await new Promise((resolve, reject) => {
+        const request = http.get(`${url}/health`, res => {
+          res.resume();
+          resolve(res);
+        });
+
+        request.on("error", reject);
+      });
+
+      if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+        return;
+      }
+    } catch (err) {
+      writeLog(`Waiting for server: ${err.message}`);
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  throw new Error(`Server did not become ready within ${timeoutMs}ms`);
+}
+
 app.whenReady().then(async () => {
   writeLog("App started");
 
@@ -32,7 +60,7 @@ app.whenReady().then(async () => {
     });
 
     await win.loadURL("data:text/html,<h2>Starting NFC Agent...</h2>");
-    await new Promise(resolve => setTimeout(resolve, 1200));
+    await waitForServerReady(SERVER_URL);
     await win.loadURL(SERVER_URL);
     writeLog("Server loaded in window");
   } catch (err) {
