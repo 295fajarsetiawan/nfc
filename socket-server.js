@@ -1,28 +1,32 @@
-const { Server } = require("socket.io");
+const { WebSocketServer } = require("ws");
 
 function attachSocketServer(server, options) {
   const {
     allowedOrigins,
     getHealthSnapshot,
     getReaderDevice,
-    getNfcStatus,
     inspectCard,
     resetCard,
     writeUrlToCard
   } = options;
 
-  const io = new Server(server, {
-    cors: {
-      origin(origin, callback) {
-        if (!origin || allowedOrigins.has(origin)) {
-          return callback(null, true);
-        }
+  const wss = new WebSocketServer({ server });
+  const clients = new Set();
 
-        return callback(new Error(`Origin not allowed: ${origin}`));
-      },
-      methods: ["GET", "POST"]
+  function sendJson(target, payload) {
+    if (target.readyState === target.OPEN) {
+      target.send(JSON.stringify(payload));
     }
-  });
+  }
+
+  function broadcast(payload) {
+    const message = JSON.stringify(payload);
+    for (const client of clients) {
+      if (client.readyState === client.OPEN) {
+        client.send(message);
+      }
+    }
+  }
 
   async function withReader(action) {
     const reader = getReaderDevice();
@@ -33,105 +37,167 @@ function attachSocketServer(server, options) {
     return action(reader);
   }
 
-  io.on("connection", socket => {
-    socket.emit("nfc:health", getHealthSnapshot());
+  function buildCheckPayload(inspection) {
+    return {
+      success: true,
+      readerName: getReaderDevice()?.name || null,
+      strategy: inspection.strategy,
+      url: inspection.url,
+      mad: inspection.mad,
+      sector0: inspection.sector0,
+      readyForAndroid: Boolean(
+        inspection.url &&
+          inspection.strategy === "mad" &&
+          inspection.mad &&
+          inspection.mad.crcValid &&
+          inspection.mad.ndefSectors.length > 0
+      ),
+      note:
+        "Agar Android mengenali URL, kartu harus benar-benar terformat NDEF MIFARE Classic dan ponsel juga harus mendukung MIFARE Classic."
+    };
+  }
 
-    socket.on("health:get", callback => {
-      callback?.(getHealthSnapshot());
+  function isOriginAllowed(origin) {
+    return !origin || allowedOrigins.has(origin);
+  }
+
+  server.on("upgrade", (request, socket) => {
+    if (!isOriginAllowed(request.headers.origin)) {
+      socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+      socket.destroy();
+    }
+  });
+
+  wss.on("connection", socket => {
+    clients.add(socket);
+    sendJson(socket, {
+      type: "nfc:health",
+      data: getHealthSnapshot()
     });
 
-    socket.on("nfc:check", async callback => {
+    socket.on("message", async rawMessage => {
+      let message;
       try {
-        const inspection = await withReader(reader => inspectCard(reader));
-        callback?.({
-          success: true,
-          readerName: getReaderDevice()?.name || null,
-          strategy: inspection.strategy,
-          url: inspection.url,
-          mad: inspection.mad,
-          sector0: inspection.sector0,
-          readyForAndroid: Boolean(
-            inspection.url &&
-              inspection.strategy === "mad" &&
-              inspection.mad &&
-              inspection.mad.crcValid &&
-              inspection.mad.ndefSectors.length > 0
-          ),
-          note:
-            "Agar Android mengenali URL, kartu harus benar-benar terformat NDEF MIFARE Classic dan ponsel juga harus mendukung MIFARE Classic."
+        message = JSON.parse(rawMessage.toString());
+      } catch (err) {
+        sendJson(socket, {
+          type: "error",
+          error: "Invalid JSON payload"
         });
-      } catch (err) {
-        callback?.({ success: false, error: err.message });
+        return;
       }
-    });
 
-    socket.on("nfc:read", async callback => {
-      try {
-        const inspection = await withReader(reader => inspectCard(reader));
-        callback?.(
-          inspection.url
-            ? {
-                success: true,
-                strategy: inspection.strategy,
-                url: inspection.url,
-                mad: inspection.mad,
-                tlvHex: inspection.tlvHex,
-                ndefMessageHex: inspection.ndefMessageHex
-              }
-            : {
-                success: false,
-                message: "No valid NDEF URL found",
-                strategy: inspection.strategy,
-                mad: inspection.mad,
-                sector0: inspection.sector0,
-                rawPayloadHex: inspection.rawPayloadHex
-              }
-        );
-      } catch (err) {
-        callback?.({ success: false, error: err.message });
-      }
-    });
-
-    socket.on("nfc:write", async (payload, callback) => {
-      try {
-        const result = await withReader(reader => writeUrlToCard(reader, payload?.url));
-        callback?.({
-          success: true,
-          message: `URL written as NDEF: ${result.url}`,
-          url: result.url,
-          nfcSectorCount: result.nfcSectorCount,
-          mad: result.mad,
-          ndefMessageHex: result.ndefMessageHex,
-          tlvHex: result.tlvHex
+      const requestId = message?.id || null;
+      const reply = payload => {
+        sendJson(socket, {
+          id: requestId,
+          ...payload
         });
+      };
+
+      try {
+        switch (message?.type) {
+          case "health:get":
+            reply({
+              type: "health:result",
+              success: true,
+              data: getHealthSnapshot()
+            });
+            break;
+
+          case "nfc:check": {
+            const inspection = await withReader(reader => inspectCard(reader));
+            reply({
+              type: "nfc:check:result",
+              ...buildCheckPayload(inspection)
+            });
+            break;
+          }
+
+          case "nfc:read": {
+            const inspection = await withReader(reader => inspectCard(reader));
+            reply({
+              type: "nfc:read:result",
+              ...(inspection.url
+                ? {
+                    success: true,
+                    strategy: inspection.strategy,
+                    url: inspection.url,
+                    mad: inspection.mad,
+                    tlvHex: inspection.tlvHex,
+                    ndefMessageHex: inspection.ndefMessageHex
+                  }
+                : {
+                    success: false,
+                    message: "No valid NDEF URL found",
+                    strategy: inspection.strategy,
+                    mad: inspection.mad,
+                    sector0: inspection.sector0,
+                    rawPayloadHex: inspection.rawPayloadHex
+                  })
+            });
+            break;
+          }
+
+          case "nfc:write": {
+            const result = await withReader(reader => writeUrlToCard(reader, message?.payload?.url));
+            reply({
+              type: "nfc:write:result",
+              success: true,
+              message: `URL written as NDEF: ${result.url}`,
+              url: result.url,
+              nfcSectorCount: result.nfcSectorCount,
+              mad: result.mad,
+              ndefMessageHex: result.ndefMessageHex,
+              tlvHex: result.tlvHex
+            });
+            break;
+          }
+
+          case "nfc:reset":
+            await withReader(reader => resetCard(reader));
+            reply({
+              type: "nfc:reset:result",
+              success: true,
+              message:
+                "Card reset to transport layout. Sector 0 MAD cleared, sectors 1-15 blank, default keys/access bits restored."
+            });
+            break;
+
+          default:
+            reply({
+              type: "error",
+              success: false,
+              error: `Unknown message type: ${message?.type || "undefined"}`
+            });
+        }
       } catch (err) {
-        callback?.({ success: false, error: err.message });
+        reply({
+          type: `${message?.type || "unknown"}:result`,
+          success: false,
+          error: err.message
+        });
       }
     });
 
-    socket.on("nfc:reset", async callback => {
-      try {
-        await withReader(reader => resetCard(reader));
-        callback?.({
-          success: true,
-          message:
-            "Card reset to transport layout. Sector 0 MAD cleared, sectors 1-15 blank, default keys/access bits restored."
-        });
-      } catch (err) {
-        callback?.({ success: false, error: err.message });
-      }
+    socket.on("close", () => {
+      clients.delete(socket);
     });
   });
 
   return {
-    io,
     broadcastStatus() {
-      io.emit("nfc:health", getHealthSnapshot());
+      broadcast({
+        type: "nfc:health",
+        data: getHealthSnapshot()
+      });
     },
     broadcastEvent(eventName, payload) {
-      io.emit(eventName, payload);
-    },
-    getNfcStatus
+      broadcast({
+        type: eventName,
+        data: payload
+      });
+    }
   };
 }
 

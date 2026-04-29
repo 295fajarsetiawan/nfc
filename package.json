@@ -8,7 +8,9 @@
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w nfc-pcsc",
     "postinstall": "electron-builder install-app-deps",
-    "dist": "electron-builder --publish=never"
+    "dist": "electron-builder --publish=never",
+    "dist:win": "electron-builder --win nsis --publish=never",
+    "dist:mac": "electron-builder --mac dmg --publish=never"
   },
   "build": {
     "appId": "com.nfc.agent",
@@ -17,6 +19,7 @@
       "main.js",
       "index.js",
       "socket-server.js",
+      "socket-client-example.html",
       "package.json",
       "node_modules/**/*"
     ],
@@ -36,11 +39,9 @@
     ]
   },
   "dependencies": {
-    "cors": "^2.8.6",
-    "express": "^5.2.1",
     "ndef": "^0.2.0",
     "nfc-pcsc": "^0.8.1",
-    "socket.io": "^4.8.3"
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "electron": "^41.3.0",

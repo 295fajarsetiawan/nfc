@@ -4,121 +4,22 @@ if (!Object.hasOwn) {
 }
 
 const fs = require("fs");
-const https = require("https");
+const http = require("http");
 const path = require("path");
-const { spawnSync } = require("child_process");
-const express = require("express");
-const cors = require("cors");
 const ndef = require("ndef");
 const { attachSocketServer } = require("./socket-server");
 
-const app = express();
-const ALLOWED_CORS_ORIGINS = new Set([
+const PORT = 43125;
+const CLIENT_HTML_PATH = path.join(__dirname, "socket-client-example.html");
+const ALLOWED_ORIGINS = new Set([
+  "http://peradiprof.or.id",
+  "http://www.peradiprof.or.id",
+  "http://localhost:43125",
+  "http://127.0.0.1:43125",
   "https://peradiprof.or.id",
   "https://www.peradiprof.or.id",
-  "https://localhost:43125",
-  "https://127.0.0.1:43125"
+  "null"
 ]);
-
-function applyCorsHeaders(req, res) {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_CORS_ORIGINS.has(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-  }
-
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    req.headers["access-control-request-headers"] || "Content-Type"
-  );
-
-  if (req.headers["access-control-request-private-network"] === "true") {
-    res.setHeader("Access-Control-Allow-Private-Network", "true");
-  }
-}
-
-app.use((req, res, next) => {
-  applyCorsHeaders(req, res);
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || ALLOWED_CORS_ORIGINS.has(origin)) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`Origin not allowed: ${origin}`));
-  }
-}));
-app.use(express.json());
-
-const PORT = 43125;
-const CERT_DIR = path.join(__dirname, ".cert");
-const HTTPS_PFX_PATH = path.join(CERT_DIR, "localhost-dev.pfx");
-const HTTPS_CER_PATH = path.join(CERT_DIR, "localhost-dev.cer");
-const HTTPS_PASSPHRASE = process.env.NFC_HTTPS_PASSPHRASE || "nfc-localhost-dev";
-const HTTPS_CERT_FRIENDLY_NAME = "NFC Agent Localhost Dev";
-
-app.get("/", (req, res) => {
-  res.type("html").send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NFC Agent</title>
-    <style>
-      body {
-        font-family: "Segoe UI", sans-serif;
-        margin: 0;
-        padding: 32px;
-        background: #f5f7fb;
-        color: #1f2937;
-      }
-      main {
-        max-width: 720px;
-        margin: 0 auto;
-        background: #ffffff;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-      }
-      h1 {
-        margin-top: 0;
-      }
-      code {
-        background: #eef2ff;
-        padding: 2px 6px;
-        border-radius: 6px;
-      }
-      ul {
-        padding-left: 20px;
-      }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>NFC Agent</h1>
-      <p>Server is running on port ${PORT}.</p>
-      <p>Available endpoints:</p>
-      <ul>
-        <li><code>GET /health</code></li>
-        <li><code>POST /write</code></li>
-        <li><code>GET /read</code></li>
-        <li><code>GET /check</code></li>
-        <li><code>GET /fix-trailer</code></li>
-        <li><code>GET /reset</code></li>
-      </ul>
-    </main>
-  </body>
-</html>`);
-});
 
 const BLOCK_SIZE = 16;
 const BLOCKS_PER_SECTOR = 4;
@@ -214,11 +115,7 @@ function emitSocketEvent(eventName, payload) {
 }
 
 function ensureNfcInitialized() {
-  if (nfcInitialized) {
-    return nfc;
-  }
-
-  if (nfcInitStarted) {
+  if (nfcInitialized || nfcInitStarted) {
     return nfc;
   }
 
@@ -298,6 +195,7 @@ function ensureNfcInitialized() {
     emitSocketStatus();
     console.error("NFC error", err);
   });
+
   nfcInitialized = true;
   nfcStatus = {
     state: "ready",
@@ -306,15 +204,6 @@ function ensureNfcInitialized() {
   emitSocketStatus();
 
   return nfc;
-}
-
-function sectorDataBlocks(sector) {
-  const base = sector * BLOCKS_PER_SECTOR;
-  return [base, base + 1, base + 2];
-}
-
-function sectorTrailerBlock(sector) {
-  return sector * BLOCKS_PER_SECTOR + 3;
 }
 
 function normalizeUrl(url) {
@@ -350,53 +239,33 @@ function createNdefMessage(url) {
   };
 }
 
-function ensureLocalhostCertificate() {
-  fs.mkdirSync(CERT_DIR, { recursive: true });
-
-  const psScript = `
-$ErrorActionPreference = 'Stop'
-$certPath = '${HTTPS_PFX_PATH.replace(/'/g, "''")}'
-$cerPath = '${HTTPS_CER_PATH.replace(/'/g, "''")}'
-$password = ConvertTo-SecureString '${HTTPS_PASSPHRASE.replace(/'/g, "''")}' -AsPlainText -Force
-$existing = Get-ChildItem Cert:\\CurrentUser\\My |
-  Where-Object { $_.FriendlyName -eq '${HTTPS_CERT_FRIENDLY_NAME.replace(/'/g, "''")}' } |
-  Sort-Object NotAfter -Descending |
-  Select-Object -First 1
-if (-not $existing) {
-  $existing = New-SelfSignedCertificate -Subject 'CN=localhost' -CertStoreLocation 'Cert:\\CurrentUser\\My' -FriendlyName '${HTTPS_CERT_FRIENDLY_NAME.replace(/'/g, "''")}' -TextExtension @('2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1')
+function createClientPage() {
+  return fs.readFileSync(CLIENT_HTML_PATH, "utf8");
 }
-Export-PfxCertificate -Cert $existing.PSPath -FilePath $certPath -Password $password | Out-Null
-Export-Certificate -Cert $existing.PSPath -FilePath $cerPath -Type CERT | Out-Null
-$trusted = Get-ChildItem Cert:\\CurrentUser\\Root |
-  Where-Object { $_.Thumbprint -eq $existing.Thumbprint } |
-  Select-Object -First 1
-if (-not $trusted) {
-  Import-Certificate -FilePath $cerPath -CertStoreLocation 'Cert:\\CurrentUser\\Root' | Out-Null
-}
-`;
 
-  const result = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psScript], {
-    encoding: "utf8",
-    windowsHide: true
+function createHttpServer() {
+  return http.createServer((req, res) => {
+    if (!ALLOWED_ORIGINS.has(req.headers.origin) && req.headers.origin) {
+      res.writeHead(403);
+      res.end("Origin not allowed");
+      return;
+    }
+
+    if (req.url === "/" || req.url === "/index.html") {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(createClientPage());
+      return;
+    }
+
+    if (req.url === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.end(JSON.stringify(getHealthSnapshot()));
+      return;
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
   });
-
-  if (result.status !== 0 || !fs.existsSync(HTTPS_PFX_PATH)) {
-    throw new Error(
-      `Failed to create localhost HTTPS certificate.${result.stderr ? ` ${result.stderr.trim()}` : ""}`
-    );
-  }
-}
-
-function createHttpsServer() {
-  ensureLocalhostCertificate();
-
-  return https.createServer(
-    {
-      pfx: fs.readFileSync(HTTPS_PFX_PATH),
-      passphrase: HTTPS_PASSPHRASE
-    },
-    app
-  );
 }
 
 function createTlv(ndefMessage) {
@@ -413,6 +282,15 @@ function createTlv(ndefMessage) {
     ndefMessage,
     Buffer.from([0xfe])
   ]);
+}
+
+function sectorDataBlocks(sector) {
+  const base = sector * BLOCKS_PER_SECTOR;
+  return [base, base + 1, base + 2];
+}
+
+function sectorTrailerBlock(sector) {
+  return sector * BLOCKS_PER_SECTOR + 3;
 }
 
 function splitToSectorPayloads(data) {
@@ -815,198 +693,21 @@ async function resetCard(reader) {
   }
 }
 
-app.post("/write", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    const result = await writeUrlToCard(readerDevice, req.body.url);
-
-    console.log(`✅ URL written as proper MIFARE Classic NDEF: ${result.url}`);
-    console.log("Tap the card to an Android phone that supports MIFARE Classic.");
-
-    res.json({
-      success: true,
-      message: `URL written as NDEF: ${result.url}`,
-      url: result.url,
-      nfcSectorCount: result.nfcSectorCount,
-      mad: result.mad,
-      ndefMessageHex: result.ndefMessageHex,
-      tlvHex: result.tlvHex,
-      note:
-        "Android decides whether to open the default browser directly or show a chooser. ACR122U only writes the tag."
-    });
-  } catch (err) {
-    console.error("Write error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/write-sector1", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    const result = await writeUrlToCard(readerDevice, req.body.url);
-
-    res.json({
-      success: true,
-      message: `URL written as NDEF starting at sector 1: ${result.url}`,
-      url: result.url,
-      nfcSectorCount: result.nfcSectorCount,
-      note:
-        "/write-sector1 sekarang menjadi alias ke format NDEF yang benar untuk MIFARE Classic 1K."
-    });
-  } catch (err) {
-    console.error("Write-sector1 error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/read", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    const inspection = await inspectCard(readerDevice);
-
-    if (!inspection.url) {
-      return res.json({
-        success: false,
-        message: "No valid NDEF URL found",
-        strategy: inspection.strategy,
-        mad: inspection.mad,
-        sector0: inspection.sector0,
-        rawPayloadHex: inspection.rawPayloadHex
-      });
-    }
-
-    res.json({
-      success: true,
-      strategy: inspection.strategy,
-      url: inspection.url,
-      mad: inspection.mad,
-      tlvHex: inspection.tlvHex,
-      ndefMessageHex: inspection.ndefMessageHex
-    });
-  } catch (err) {
-    console.error("Read error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/check", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    const inspection = await inspectCard(readerDevice);
-
-    res.json({
-      success: true,
-      readerName: readerDevice.name,
-      strategy: inspection.strategy,
-      url: inspection.url,
-      mad: inspection.mad,
-      sector0: inspection.sector0,
-      readyForAndroid: Boolean(
-        inspection.url &&
-          inspection.strategy === "mad" &&
-          inspection.mad &&
-          inspection.mad.crcValid &&
-          inspection.mad.ndefSectors.length > 0
-      ),
-      note:
-        "Agar Android mengenali URL, kartu harus benar-benar terformat NDEF MIFARE Classic dan ponsel juga harus mendukung MIFARE Classic."
-    });
-  } catch (err) {
-    console.error("Check error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/fix-trailer", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    const inspection = await inspectCard(readerDevice);
-    if (!inspection.url) {
-      return res.status(400).json({
-        error: "No URL found to rewrite. Use POST /write with a URL."
-      });
-    }
-
-    const result = await writeUrlToCard(readerDevice, inspection.url);
-
-    res.json({
-      success: true,
-      message: "MIFARE Classic NDEF layout repaired and URL rewritten",
-      url: result.url,
-      mad: result.mad
-    });
-  } catch (err) {
-    console.error("Fix-trailer error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/reset", async (req, res) => {
-  try {
-    if (!readerDevice) {
-      return res.status(400).json({ error: "Reader not connected" });
-    }
-
-    await resetCard(readerDevice);
-
-    res.json({
-      success: true,
-      message:
-        "Card reset to transport layout. Sector 0 MAD cleared, sectors 1-15 blank, default keys/access bits restored."
-    });
-  } catch (err) {
-    console.error("Reset error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/health", (req, res) => {
-  res.json(getHealthSnapshot());
-});
-
 function startServer() {
-  const server = createHttpsServer();
+  const server = createHttpServer();
   socketBridge = attachSocketServer(server, {
-    allowedOrigins: ALLOWED_CORS_ORIGINS,
+    allowedOrigins: ALLOWED_ORIGINS,
     getHealthSnapshot,
     getReaderDevice: () => readerDevice,
-    getNfcStatus: () => nfcStatus,
     inspectCard,
     resetCard,
     writeUrlToCard
   });
 
   server.listen(PORT, () => {
-    console.log(`\n✅ NFC Agent Running on http://localhost:${PORT}`);
-    console.log(`\n📌 MIFARE Classic 1K NDEF endpoints`);
-    console.log(`   POST /write         - Format card correctly and write URL as NDEF`);
-    console.log(`   GET  /read          - Read NDEF URL`);
-    console.log(`   GET  /check         - Inspect MAD + NDEF mapping`);
-    console.log(`   GET  /fix-trailer   - Rewrite current URL using proper NDEF layout`);
-    console.log(`   GET  /reset         - Reset card to transport/default layout`);
-    console.log(`\n🚀 Test with:`);
-    console.log(
-      `   curl -k -X POST https://localhost:${PORT}/write -H "Content-Type: application/json" -d '{"url":"https://peradipro.com"}'`
-    );
-    console.log(`   curl -k https://localhost:${PORT}/read`);
-    console.log(`   curl -k https://localhost:${PORT}/check`);
-    console.log(`   socket.io https://localhost:${PORT}/socket.io/`);
-    console.log(`\nℹ️  Browser chooser/open is decided by Android, not by the ACR122U writer.`);
+    console.log(`NFC Agent WebSocket running at http://localhost:${PORT}`);
+    console.log(`WebSocket endpoint: ws://localhost:${PORT}`);
+    console.log("Commands via WebSocket message types: health:get, nfc:write, nfc:read, nfc:check, nfc:reset");
   });
 
   setImmediate(() => {
@@ -1030,7 +731,6 @@ if (require.main === module) {
 }
 
 module.exports = {
-  app,
   createNdefMessage,
   createTlv,
   buildMadDirectory,

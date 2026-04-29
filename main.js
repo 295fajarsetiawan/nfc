@@ -1,9 +1,8 @@
 const electron = require("electron");
 const fs = require("fs");
-const https = require("https");
 const path = require("path");
 
-const SERVER_URL = "https://localhost:43125";
+const SERVER_URL = "http://localhost:43125";
 const { app, BrowserWindow } =
   typeof electron === "string" ? {} : electron;
 
@@ -19,56 +18,11 @@ function writeLog(message) {
   fs.appendFileSync(logPath, `[${time}] ${message}\n`);
 }
 
-async function waitForServerReady(url, timeoutMs = 15000) {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await new Promise((resolve, reject) => {
-        const request = https.get(
-          `${url}/health`,
-          {
-            rejectUnauthorized: false
-          },
-          res => {
-            res.resume();
-            resolve(res);
-          }
-        );
-
-        request.on("error", reject);
-      });
-
-      if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
-        return;
-      }
-    } catch (err) {
-      writeLog(`Waiting for server: ${err.message}`);
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 500));
-  }
-
-  throw new Error(`Server did not become ready within ${timeoutMs}ms`);
-}
-
-app.on("certificate-error", (event, webContents, url, error, certificate, callback) => {
-  if (/^https:\/\/(localhost|127\.0\.0\.1):43125(?:\/|$)/i.test(url)) {
-    event.preventDefault();
-    callback(true);
-    return;
-  }
-
-  callback(false);
-});
-
 app.whenReady().then(async () => {
   writeLog("App started");
 
   try {
     const server = require("./index.js");
-
-    // 🔥 start server
     server.startServer();
     writeLog("Server starting...");
 
@@ -77,13 +31,10 @@ app.whenReady().then(async () => {
       height: 700
     });
 
-    // loading dulu biar tidak blank
-    win.loadURL("data:text/html,<h2>Starting NFC Agent...</h2>");
-
-    await waitForServerReady(SERVER_URL);
+    await win.loadURL("data:text/html,<h2>Starting NFC Agent...</h2>");
+    await new Promise(resolve => setTimeout(resolve, 1200));
     await win.loadURL(SERVER_URL);
     writeLog("Server loaded in window");
-
   } catch (err) {
     writeLog("ERROR: " + err.stack);
     const win = BrowserWindow.getAllWindows()[0];

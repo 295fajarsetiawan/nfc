@@ -2,7 +2,9 @@ name: Build Electron App
 
 on:
   push:
-    branches: [main]
+    branches:
+      - win-mac
+  workflow_dispatch:
 
 jobs:
   build-mac:
@@ -16,37 +18,38 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Cache npm
+      - name: Cache Electron Builder
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: mac-node-${{ hashFiles('**/package-lock.json') }}
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: mac-electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            mac-electron-${{ runner.os }}-
 
       - name: Install deps
-        run: npm install
+        run: npm ci
 
-      # 🔥 WAJIB
       - name: Rebuild native modules
         run: npx electron-rebuild -f -w nfc-pcsc
 
-      # 🔥 WAJIB (INI YANG BELUM ADA DI PUNYAMU)
       - name: Install app deps
         run: npx electron-builder install-app-deps
 
       - name: Build DMG
-        run: npm run dist
+        run: npm run dist:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-
-      - name: List dist
-        run: ls -la dist
 
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: mac-dmg
           path: dist/*.dmg
+          if-no-files-found: error
 
   build-win:
     runs-on: windows-latest
@@ -59,37 +62,38 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Setup Python (node-gyp)
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.x
+          python-version: "3.x"
 
-      - name: Cache npm
+      - name: Cache Electron Builder
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: win-node-${{ hashFiles('**/package-lock.json') }}
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: win-electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            win-electron-${{ runner.os }}-
 
       - name: Install deps
-        run: npm install
+        run: npm ci
 
-      # 🔥 WAJIB
       - name: Rebuild native modules
         run: npx electron-rebuild -f -w nfc-pcsc
 
-      # 🔥 WAJIB
       - name: Install app deps
         run: npx electron-builder install-app-deps
 
       - name: Build EXE
-        run: npm run dist
-
-      - name: List dist
-        run: dir dist
+        run: npm run dist:win
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
           path: dist/*.exe
+          if-no-files-found: error

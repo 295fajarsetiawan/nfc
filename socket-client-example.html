@@ -3,62 +3,1027 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NFC Socket Client Example</title>
+    <title>NFC Agent Control Panel</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6efe4;
+        --panel: rgba(255, 250, 244, 0.88);
+        --panel-strong: #fffdf8;
+        --line: rgba(120, 89, 55, 0.14);
+        --text: #2f241b;
+        --muted: #73614f;
+        --accent: #c65d2e;
+        --accent-strong: #9f3d17;
+        --teal: #1d6b68;
+        --danger: #b63f2c;
+        --ok: #216a52;
+        --warn: #a2621b;
+        --shadow: 0 24px 80px rgba(76, 48, 25, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(198, 93, 46, 0.20), transparent 32%),
+          radial-gradient(circle at top right, rgba(29, 107, 104, 0.16), transparent 28%),
+          linear-gradient(180deg, #fcf8f1 0%, var(--bg) 100%);
+      }
+
+      .shell {
+        width: min(96vw, 1680px);
+        margin: 0 auto;
+        padding: 28px 18px 42px;
+      }
+
+      .toast {
+        position: fixed;
+        top: 18px;
+        right: 18px;
+        z-index: 20;
+        min-width: 260px;
+        max-width: 380px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        color: #fff;
+        background: linear-gradient(135deg, #205b4a 0%, #153f33 100%);
+        box-shadow: 0 18px 44px rgba(21, 63, 51, 0.22);
+        transform: translateY(-18px);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 180ms ease, transform 180ms ease;
+      }
+
+      .toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      .toast.error {
+        background: linear-gradient(135deg, #b14f3e 0%, #8f2f23 100%);
+        box-shadow: 0 18px 44px rgba(143, 47, 35, 0.24);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(360px, 0.85fr);
+        gap: 20px;
+        margin-bottom: 20px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 28px;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(14px);
+      }
+
+      .hero-main {
+        padding: 28px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero-main::after {
+        content: "";
+        position: absolute;
+        right: -60px;
+        top: -60px;
+        width: 220px;
+        height: 220px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(198, 93, 46, 0.22), transparent 70%);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.62);
+        border: 1px solid rgba(120, 89, 55, 0.12);
+        color: var(--muted);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 18px 0 12px;
+        font-size: clamp(34px, 5vw, 54px);
+        line-height: 0.98;
+        letter-spacing: -0.04em;
+      }
+
+      .hero-copy {
+        max-width: 670px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.65;
+      }
+
+      .hero-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 26px;
+      }
+
+      .mini-stat {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid rgba(120, 89, 55, 0.12);
+        border-radius: 22px;
+        padding: 16px;
+      }
+
+      .mini-stat strong {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .mini-stat span {
+        display: block;
+        font-size: 19px;
+        font-weight: 700;
+      }
+
+      .hero-side {
+        padding: 24px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 16px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(120, 89, 55, 0.12);
+        font-weight: 700;
+        color: var(--teal);
+      }
+
+      .status-dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: currentColor;
+        box-shadow: 0 0 0 6px rgba(29, 107, 104, 0.12);
+      }
+
+      .side-card {
+        padding: 18px;
+        border-radius: 22px;
+        background: var(--panel-strong);
+        border: 1px solid rgba(120, 89, 55, 0.12);
+      }
+
+      .side-card h2,
+      .workspace h2,
+      .log-panel h2,
+      .insight-panel h2 {
+        margin: 0 0 8px;
+        font-size: 18px;
+      }
+
+      .side-card p,
+      .workspace p,
+      .insight-panel p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .workspace,
+      .insights {
+        display: grid;
+        grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+        gap: 20px;
+      }
+
+      .workspace-panel,
+      .log-panel,
+      .insight-panel {
+        padding: 24px;
+      }
+
+      .log-panel {
+        width: 100%;
+      }
+
+      .stack {
+        display: grid;
+        gap: 16px;
+      }
+
+      .field {
+        display: grid;
+        gap: 8px;
+      }
+
+      label {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      input {
+        width: 100%;
+        border: 1px solid rgba(120, 89, 55, 0.16);
+        background: rgba(255, 255, 255, 0.92);
+        color: var(--text);
+        border-radius: 18px;
+        padding: 15px 16px;
+        font-size: 15px;
+        outline: none;
+        transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+      }
+
+      input:focus {
+        border-color: rgba(198, 93, 46, 0.46);
+        box-shadow: 0 0 0 4px rgba(198, 93, 46, 0.10);
+        transform: translateY(-1px);
+      }
+
+      .button-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      button {
+        border: 0;
+        border-radius: 18px;
+        padding: 14px 16px;
+        cursor: pointer;
+        color: #fff;
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        box-shadow: 0 14px 28px rgba(198, 93, 46, 0.22);
+        transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease, opacity 180ms ease;
+      }
+
+      button:hover {
+        transform: translateY(-2px);
+        filter: saturate(1.02);
+        box-shadow: 0 20px 34px rgba(198, 93, 46, 0.24);
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.72;
+        transform: none;
+        filter: none;
+        box-shadow: none;
+      }
+
+      button[hidden] {
+        display: none;
+      }
+
+      button.alt {
+        background: linear-gradient(135deg, #275e73 0%, #184657 100%);
+        box-shadow: 0 14px 28px rgba(24, 70, 87, 0.22);
+      }
+
+      button.ghost {
+        background: linear-gradient(135deg, #5d7d71 0%, #315b53 100%);
+        box-shadow: 0 14px 28px rgba(49, 91, 83, 0.18);
+      }
+
+      button.danger {
+        background: linear-gradient(135deg, #cb6347 0%, var(--danger) 100%);
+        box-shadow: 0 14px 28px rgba(182, 63, 44, 0.18);
+      }
+
+      .hint-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .hint {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.7);
+        border: 1px solid rgba(120, 89, 55, 0.10);
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .hint strong {
+        color: var(--text);
+      }
+
+      .data-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .data-card {
+        padding: 16px;
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.76);
+        border: 1px solid rgba(120, 89, 55, 0.10);
+      }
+
+      .data-card strong {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .data-card span,
+      .data-card a {
+        display: block;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text);
+        word-break: break-word;
+      }
+
+      .data-card a {
+        color: var(--accent-strong);
+        text-decoration: none;
+      }
+
+      .data-card a:hover {
+        text-decoration: underline;
+      }
+
+      .code-block {
+        margin-top: 16px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: #201c19;
+        color: #efe4d7;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 78px;
+      }
+
+      .result-panel {
+        margin-top: 18px;
+        padding: 18px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.56);
+        border: 1px solid rgba(120, 89, 55, 0.10);
+      }
+
+      .summary-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(33, 106, 82, 0.12);
+        color: var(--ok);
+        font-weight: 700;
+        margin-top: 14px;
+      }
+
+      .summary-pill.warn {
+        background: rgba(162, 98, 27, 0.12);
+        color: var(--warn);
+      }
+
+      .summary-pill.error {
+        background: rgba(182, 63, 44, 0.12);
+        color: var(--danger);
+      }
+
+      .log-shell {
+        margin-top: 12px;
+        border-radius: 24px;
+        overflow: hidden;
+        border: 1px solid rgba(120, 89, 55, 0.12);
+        background: #1a1715;
+      }
+
+      .log-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        color: #f8ede3;
+      }
+
+      .log-meta {
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #c7b5a4;
+      }
+
+      pre {
+        margin: 0;
+        padding: 18px;
+        min-height: 320px;
+        max-height: min(62vh, 820px);
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        color: #f5ede5;
+        font-size: 13px;
+        line-height: 1.65;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 18%),
+          #1a1715;
+      }
+
+      .footer-note {
+        margin-top: 16px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (min-width: 1500px) {
+        .hero-main,
+        .hero-side,
+        .workspace-panel,
+        .log-panel,
+        .insight-panel {
+          padding: 30px;
+        }
+
+        .button-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .data-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 960px) {
+        .hero,
+        .workspace,
+        .insights {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-grid,
+        .data-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .shell {
+          padding: 18px 12px 28px;
+        }
+
+        .hero-main,
+        .hero-side,
+        .workspace-panel,
+        .log-panel,
+        .insight-panel {
+          padding: 18px;
+        }
+
+        .button-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
   </head>
   <body>
-    <h1>NFC Socket Client Example</h1>
-    <pre id="log"></pre>
+    <div class="toast" id="toast"></div>
 
-    <script src="https://127.0.0.1:43125/socket.io/socket.io.js"></script>
+    <div class="shell">
+      <section class="hero">
+        <div class="panel hero-main">
+          <div class="eyebrow">WebSocket NFC Console</div>
+          <h1>NFC Agent Control Panel</h1>
+          <p class="hero-copy">
+            Saat halaman dibuka, client akan langsung mencoba connect ke socket server.
+            Kalau belum berhasil, tombol connect tetap tersedia untuk retry manual.
+          </p>
+          <div class="hero-grid">
+            <div class="mini-stat">
+              <strong>Transport</strong>
+              <span>Pure WebSocket</span>
+            </div>
+            <div class="mini-stat">
+              <strong>Target</strong>
+              <span>MIFARE Classic 1K</span>
+            </div>
+            <div class="mini-stat">
+              <strong>Port</strong>
+              <span>43125</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel hero-side">
+          <div class="status-badge">
+            <span class="status-dot"></span>
+            <span id="statusText">Connecting...</span>
+          </div>
+
+          <div class="side-card">
+            <h2>Live Reader Status</h2>
+            <p id="readerSummary">Menunggu koneksi WebSocket dan status reader NFC.</p>
+          </div>
+
+          <div class="side-card">
+            <h2>Quick Flow</h2>
+            <p>Connect otomatis, cek health, lalu tempel kartu untuk read atau write sesuai kebutuhan.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="panel workspace-panel">
+          <h2>Control Desk</h2>
+          <p>Atur koneksi socket dan URL tujuan sebelum melakukan operasi pada kartu NFC.</p>
+
+          <div class="stack" style="margin-top: 18px;">
+            <div class="field">
+              <label for="socketUrl">Socket URL</label>
+              <input id="socketUrl" value="ws://127.0.0.1:43125" />
+            </div>
+
+            <div class="field">
+              <label for="urlInput">URL Untuk Ditulis</label>
+              <input id="urlInput" value="" placeholder="https://example.com" />
+            </div>
+
+            <div class="button-grid">
+              <button id="connectBtn" hidden>Connect Socket</button>
+              <button id="writeBtn">Write To Card</button>
+              <button id="readBtn" class="alt">Read From Card</button>
+              <button id="checkBtn" class="alt">Check Card</button>
+              <button id="resetBtn" class="danger">Reset Card</button>
+            </div>
+
+            <div class="result-panel">
+              <h2>Read Card Result</h2>
+              <p>Hasil pembacaan kartu akan langsung muncul di bawah tombol ini.</p>
+              <div class="data-grid">
+                <div class="data-card">
+                  <strong>Strategy</strong>
+                  <span id="readStrategy">-</span>
+                </div>
+                <div class="data-card">
+                  <strong>URL</strong>
+                  <a id="readUrl" href="#" target="_blank" rel="noreferrer">-</a>
+                </div>
+                <div class="data-card">
+                  <strong>NDEF Sectors</strong>
+                  <span id="readSectors">-</span>
+                </div>
+              </div>
+              <div class="code-block" id="readDetails">Belum ada data read card.</div>
+              <div class="summary-pill warn" id="readSummary">Tekan "Read From Card" untuk melihat hasil pembacaan.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel workspace-panel">
+          <h2>Health Overview</h2>
+          <p>Status service dan reader NFC akan muncul di sini otomatis setelah connect.</p>
+          <div class="data-grid">
+            <div class="data-card">
+              <strong>Socket</strong>
+              <span id="healthSocket">Connecting...</span>
+            </div>
+            <div class="data-card">
+              <strong>NFC State</strong>
+              <span id="healthNfcState">-</span>
+            </div>
+            <div class="data-card">
+              <strong>Reader</strong>
+              <span id="healthReader">-</span>
+            </div>
+            <div class="data-card">
+              <strong>Error</strong>
+              <span id="healthError">-</span>
+            </div>
+          </div>
+          <div class="summary-pill warn" id="healthSummary">Menunggu data health.</div>
+        </div>
+      </section>
+
+      <section class="insights" style="margin-top: 20px;">
+        <div class="panel insight-panel">
+          <h2>Live Read Behavior</h2>
+          <p>Saat kartu ditempel ke reader, client akan otomatis mencoba membaca isinya.</p>
+          <div class="hint-list" style="margin-top: 18px;">
+            <div class="hint"><strong>Auto read.</strong> Event kartu masuk akan langsung memicu proses read tanpa klik tombol.</div>
+            <div class="hint"><strong>URL sync.</strong> Jika kartu berisi URL, nilai itu akan ikut masuk ke field URL di form.</div>
+            <div class="hint"><strong>Manual action ready.</strong> Tombol write, read, check, dan reset tetap bisa dipakai kapan saja.</div>
+          </div>
+        </div>
+        <div class="panel insight-panel">
+          <h2>Card Presence</h2>
+          <p>Panel ini membantu memantau apakah kartu sedang terdeteksi di reader.</p>
+          <div class="hint-list" style="margin-top: 18px;">
+            <div class="hint" id="cardPresence">Belum ada kartu yang terdeteksi.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel log-panel" style="margin-top: 20px;">
+        <h2>Activity Log</h2>
+        <p>Semua event WebSocket dan hasil operasi tetap tercatat di sini untuk debugging.</p>
+
+        <div class="log-shell">
+          <div class="log-head">
+            <div>Realtime Console</div>
+            <div class="log-meta" id="logMeta">idle</div>
+          </div>
+          <pre id="log"></pre>
+        </div>
+
+        <div class="footer-note">
+          Halaman ini juga dipakai sebagai UI bawaan aplikasi Electron, jadi perubahan di sini langsung ikut ke app.
+        </div>
+      </section>
+
+      <section class="panel insight-panel" style="margin-top: 20px;">
+        <h2>Operator Notes</h2>
+        <p>Catatan singkat operator saya pindahkan ke paling bawah supaya area utama fokus ke aksi dan hasil baca kartu.</p>
+        <div class="hint-list" style="margin-top: 18px;">
+          <div class="hint"><strong>Auto connect.</strong> Saat halaman pertama dibuka, socket langsung mencoba connect otomatis.</div>
+          <div class="hint"><strong>Notif koneksi.</strong> Saat connect atau error, notifikasi singkat muncul di kanan atas.</div>
+          <div class="hint"><strong>Tempel kartu.</strong> Begitu kartu terdeteksi, hasil baca akan langsung muncul di panel read card result.</div>
+        </div>
+      </section>
+    </div>
+
     <script>
-      const log = document.getElementById("log");
-      const append = value => {
-        log.textContent += `${value}\n`;
-      };
+      const logEl = document.getElementById("log");
+      const logMetaEl = document.getElementById("logMeta");
+      const socketUrlEl = document.getElementById("socketUrl");
+      const urlInputEl = document.getElementById("urlInput");
+      const statusTextEl = document.getElementById("statusText");
+      const readerSummaryEl = document.getElementById("readerSummary");
+      const connectBtnEl = document.getElementById("connectBtn");
+      const toastEl = document.getElementById("toast");
+      const healthSocketEl = document.getElementById("healthSocket");
+      const healthNfcStateEl = document.getElementById("healthNfcState");
+      const healthReaderEl = document.getElementById("healthReader");
+      const healthErrorEl = document.getElementById("healthError");
+      const healthSummaryEl = document.getElementById("healthSummary");
+      const readStrategyEl = document.getElementById("readStrategy");
+      const readUrlEl = document.getElementById("readUrl");
+      const readSectorsEl = document.getElementById("readSectors");
+      const readDetailsEl = document.getElementById("readDetails");
+      const readSummaryEl = document.getElementById("readSummary");
+      const cardPresenceEl = document.getElementById("cardPresence");
+      const writeBtnEl = document.getElementById("writeBtn");
+      const readBtnEl = document.getElementById("readBtn");
+      const checkBtnEl = document.getElementById("checkBtn");
+      const resetBtnEl = document.getElementById("resetBtn");
 
-      const socket = io("https://127.0.0.1:43125", {
-        transports: ["websocket", "polling"]
-      });
+      let socket = null;
+      let requestId = 0;
+      let toastTimer = null;
+      let hasShownConnectedToast = false;
+      let autoReadInFlight = false;
+      let lastAutoReadUid = null;
+      const pending = new Map();
+      const buttonLabels = new Map();
 
-      socket.on("connect", () => {
-        append(`connected: ${socket.id}`);
+      function append(label, payload) {
+        const timestamp = new Date().toLocaleTimeString();
+        logEl.textContent = `[${timestamp}] ${label}\n${JSON.stringify(payload, null, 2)}\n\n${logEl.textContent}`;
+        logMetaEl.textContent = `${label} • ${timestamp}`;
+      }
 
-        socket.emit("health:get", response => {
-          append(`health: ${JSON.stringify(response)}`);
+      function showToast(message, type) {
+        toastEl.textContent = message;
+        toastEl.className = `toast show${type === "error" ? " error" : ""}`;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toastEl.className = `toast${type === "error" ? " error" : ""}`;
+        }, 2600);
+      }
+
+      function setStatus(text, summary) {
+        statusTextEl.textContent = text;
+        if (summary) {
+          readerSummaryEl.textContent = summary;
+        }
+      }
+
+      function setConnectButtonVisible(visible) {
+        connectBtnEl.hidden = !visible;
+      }
+
+      function setButtonLoading(button, isLoading, loadingText) {
+        if (!button) {
+          return;
+        }
+
+        if (!buttonLabels.has(button)) {
+          buttonLabels.set(button, button.textContent);
+        }
+
+        button.disabled = isLoading;
+        button.textContent = isLoading ? loadingText : buttonLabels.get(button);
+      }
+
+      function setHealthView(data) {
+        healthSocketEl.textContent = socket && socket.readyState === WebSocket.OPEN ? "Connected" : "Disconnected";
+        healthNfcStateEl.textContent = data?.nfcState || "-";
+        healthReaderEl.textContent = data?.readerConnected ? data.readerName || "Unknown reader" : "Not connected";
+        healthErrorEl.textContent = data?.nfcError || "-";
+
+        let summaryText = "Menunggu data health.";
+        let summaryClass = "summary-pill warn";
+        if (data?.readerConnected) {
+          summaryText = "Reader sudah terhubung dan siap dipakai.";
+          summaryClass = "summary-pill";
+        } else if (data?.nfcState === "error") {
+          summaryText = data.nfcError || "Terjadi error pada service NFC.";
+          summaryClass = "summary-pill error";
+        } else if (data?.nfcState) {
+          summaryText = `Service NFC berada pada status ${data.nfcState}.`;
+        }
+
+        healthSummaryEl.textContent = summaryText;
+        healthSummaryEl.className = summaryClass;
+      }
+
+      function setReadView(response) {
+        if (!response) {
+          return;
+        }
+
+        if (response.success) {
+          readStrategyEl.textContent = response.strategy || "-";
+          readUrlEl.textContent = response.url || "-";
+          readUrlEl.href = response.url || "#";
+          readSectorsEl.textContent = response.mad?.ndefSectors?.length ?? "-";
+          readDetailsEl.textContent = JSON.stringify({
+            tlvHex: response.tlvHex || null,
+            ndefMessageHex: response.ndefMessageHex || null,
+            mad: response.mad || null
+          }, null, 2);
+          readSummaryEl.textContent = "Kartu berhasil dibaca dan URL ditemukan.";
+          readSummaryEl.className = "summary-pill";
+          return;
+        }
+
+        readStrategyEl.textContent = response.strategy || "-";
+        readUrlEl.textContent = "-";
+        readUrlEl.href = "#";
+        readSectorsEl.textContent = response.mad?.ndefSectors?.length ?? "-";
+        readDetailsEl.textContent = JSON.stringify({
+          sector0: response.sector0 || null,
+          rawPayloadHex: response.rawPayloadHex || null,
+          mad: response.mad || null
+        }, null, 2);
+        readSummaryEl.textContent = response.error || response.message || "Belum ada URL valid pada kartu.";
+        readSummaryEl.className = response.error ? "summary-pill error" : "summary-pill warn";
+      }
+
+      function clearReadView(message) {
+        readStrategyEl.textContent = "-";
+        readUrlEl.textContent = "-";
+        readUrlEl.href = "#";
+        readSectorsEl.textContent = "-";
+        readDetailsEl.textContent = "Belum ada data read card.";
+        readSummaryEl.textContent = message || 'Tekan "Read From Card" untuk melihat hasil pembacaan.';
+        readSummaryEl.className = "summary-pill warn";
+      }
+
+      function updateStatusFromHealth(data) {
+        if (!data) {
+          return;
+        }
+
+        setHealthView(data);
+
+        if (data.readerConnected) {
+          setStatus("Reader Connected", `Reader aktif: ${data.readerName || "Unknown reader"}`);
+          return;
+        }
+
+        if (data.nfcState === "error") {
+          setStatus("NFC Error", data.nfcError || "Terjadi kesalahan pada inisialisasi NFC.");
+          return;
+        }
+
+        if (data.nfcState === "initializing") {
+          setStatus("Initializing NFC", "Service sedang menyiapkan reader NFC.");
+          return;
+        }
+
+        setStatus("Reader Disconnected", "Socket aktif, tapi reader NFC belum terhubung.");
+      }
+
+      async function triggerAutoRead(cardData) {
+        if (!cardData?.present || autoReadInFlight) {
+          return;
+        }
+
+        if (cardData.uid && lastAutoReadUid === cardData.uid) {
+          return;
+        }
+
+        autoReadInFlight = true;
+        lastAutoReadUid = cardData.uid || null;
+        cardPresenceEl.textContent = `Kartu terdeteksi${cardData.uid ? `: ${cardData.uid}` : ""}. Sedang membaca data...`;
+
+        try {
+          setButtonLoading(readBtnEl, true, "Reading...");
+          await send("nfc:read");
+        } finally {
+          setButtonLoading(readBtnEl, false);
+          autoReadInFlight = false;
+        }
+      }
+
+      function connect() {
+        if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+          append("socket", { message: "already connecting or connected" });
+          return;
+        }
+
+        setStatus("Connecting...", "Mencoba membuka koneksi WebSocket ke server.");
+        setConnectButtonVisible(false);
+        healthSocketEl.textContent = "Connecting...";
+        socket = new WebSocket(socketUrlEl.value);
+
+        socket.addEventListener("open", () => {
+          setStatus("Socket Connected", "Koneksi WebSocket aktif. Mengambil health server.");
+          setConnectButtonVisible(false);
+          healthSocketEl.textContent = "Connected";
+          append("open", { url: socketUrlEl.value });
+          if (!hasShownConnectedToast) {
+            showToast("Socket berhasil terhubung.", "success");
+            hasShownConnectedToast = true;
+          } else {
+            showToast("Socket connected kembali.", "success");
+          }
+          send("health:get");
         });
-      });
 
-      socket.on("nfc:health", payload => {
-        append(`nfc:health ${JSON.stringify(payload)}`);
-      });
-
-      socket.on("nfc:reader", payload => {
-        append(`nfc:reader ${JSON.stringify(payload)}`);
-      });
-
-      socket.on("nfc:card", payload => {
-        append(`nfc:card ${JSON.stringify(payload)}`);
-      });
-
-      window.writeUrl = url =>
-        socket.emit("nfc:write", { url }, response => {
-          append(`nfc:write ${JSON.stringify(response)}`);
+        socket.addEventListener("close", () => {
+          setStatus("Socket Closed", "Koneksi WebSocket terputus.");
+          setConnectButtonVisible(true);
+          healthSocketEl.textContent = "Disconnected";
+          append("close", {});
+          showToast("Socket terputus. Silakan connect lagi.", "error");
+          setHealthView({
+            nfcState: "disconnected",
+            nfcError: null,
+            readerConnected: false,
+            readerName: null
+          });
         });
 
-      window.readCard = () =>
-        socket.emit("nfc:read", response => {
-          append(`nfc:read ${JSON.stringify(response)}`);
+        socket.addEventListener("error", () => {
+          setStatus("Socket Error", "Periksa URL socket atau sertifikat localhost.");
+          setConnectButtonVisible(true);
+          healthSocketEl.textContent = "Error";
+          append("error", { message: "websocket error" });
+          showToast("Gagal connect ke socket server.", "error");
         });
 
-      window.checkCard = () =>
-        socket.emit("nfc:check", response => {
-          append(`nfc:check ${JSON.stringify(response)}`);
-        });
+        socket.addEventListener("message", event => {
+          const message = JSON.parse(event.data);
 
-      window.resetCard = () =>
-        socket.emit("nfc:reset", response => {
-          append(`nfc:reset ${JSON.stringify(response)}`);
+          if (message.type === "nfc:health") {
+            updateStatusFromHealth(message.data);
+          }
+
+          if (message.type === "nfc:card") {
+            const cardData = message.data || {};
+            if (cardData.present) {
+              cardPresenceEl.textContent = `Kartu terdeteksi${cardData.uid ? `: ${cardData.uid}` : ""}.`;
+              showToast("Kartu terdeteksi, membaca data...", "success");
+              triggerAutoRead(cardData);
+            } else {
+              cardPresenceEl.textContent = "Kartu diangkat dari reader.";
+              lastAutoReadUid = null;
+              clearReadView("Kartu diangkat dari reader. Hasil baca dibersihkan.");
+            }
+          }
+
+          if (message.id && pending.has(message.id)) {
+            const { resolve, reject } = pending.get(message.id);
+            pending.delete(message.id);
+
+            if (message.success === false) {
+              reject(message);
+              return;
+            }
+
+            resolve(message);
+            return;
+          }
+
+          append(message.type || "event", message.data || message);
         });
+      }
+
+      function send(type, payload) {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          append(type, { error: "socket belum connect" });
+          showToast("Socket belum connect.", "error");
+          setConnectButtonVisible(true);
+          return Promise.resolve();
+        }
+
+        return new Promise((resolve, reject) => {
+          const id = `req-${++requestId}`;
+          pending.set(id, { resolve, reject });
+          socket.send(JSON.stringify({ id, type, payload }));
+        })
+          .then(response => {
+            if (response.type === "health:result") {
+              updateStatusFromHealth(response.data);
+            }
+            if (response.type === "nfc:read:result") {
+              setReadView(response);
+            }
+            if (response.type === "nfc:write:result" && response.success) {
+              showToast("Write to card berhasil.", "success");
+            }
+            if (response.type === "nfc:reset:result" && response.success) {
+              showToast("Reset card berhasil.", "success");
+            }
+            append(type, response);
+            return response;
+          })
+          .catch(error => {
+            if (type === "nfc:read") {
+              setReadView(error);
+            }
+            append(`${type}:error`, error);
+            return error;
+          });
+      }
+
+      async function runButtonAction(button, loadingText, action) {
+        setButtonLoading(button, true, loadingText);
+        try {
+          return await action();
+        } finally {
+          setButtonLoading(button, false);
+        }
+      }
+
+      document.getElementById("connectBtn").addEventListener("click", connect);
+      writeBtnEl.addEventListener("click", () =>
+        runButtonAction(writeBtnEl, "Writing...", () => send("nfc:write", { url: urlInputEl.value }))
+      );
+      readBtnEl.addEventListener("click", () =>
+        runButtonAction(readBtnEl, "Reading...", () => send("nfc:read"))
+      );
+      checkBtnEl.addEventListener("click", () =>
+        runButtonAction(checkBtnEl, "Checking...", () => send("nfc:check"))
+      );
+      resetBtnEl.addEventListener("click", () =>
+        runButtonAction(resetBtnEl, "Resetting...", async () => {
+          const resetResponse = await send("nfc:reset");
+          if (resetResponse?.success) {
+            await send("nfc:read");
+          }
+          return resetResponse;
+        })
+      );
+
+      if (location.host) {
+        socketUrlEl.value = `ws://${location.host}`;
+      }
+
+      setConnectButtonVisible(false);
+      setHealthView(null);
+      clearReadView();
+      connect();
     </script>
   </body>
 </html>
