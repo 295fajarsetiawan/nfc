@@ -11,15 +11,50 @@ const { attachSocketServer } = require("./socket-server");
 
 const PORT = 43125;
 const CLIENT_HTML_PATH = path.join(__dirname, "socket-client-example.html");
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 const ALLOWED_ORIGINS = new Set([
   "http://peradiprof.or.id",
   "http://www.peradiprof.or.id",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
   "http://localhost:43125",
   "http://127.0.0.1:43125",
   "https://peradiprof.or.id",
   "https://www.peradiprof.or.id",
   "null"
 ]);
+
+function isLoopbackOrigin(origin) {
+  try {
+    const parsed = new URL(origin);
+    return (
+      ["http:", "https:"].includes(parsed.protocol) &&
+      LOOPBACK_HOSTNAMES.has(parsed.hostname)
+    );
+  } catch (err) {
+    return false;
+  }
+}
+
+function isOriginAllowed(origin) {
+  return !origin || ALLOWED_ORIGINS.has(origin) || isLoopbackOrigin(origin);
+}
+
+function applyCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (!origin || !isOriginAllowed(origin)) {
+    return;
+  }
+
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.headers["access-control-request-private-network"] === "true") {
+    res.setHeader("Access-Control-Allow-Private-Network", "true");
+  }
+}
 
 const BLOCK_SIZE = 16;
 const BLOCKS_PER_SECTOR = 4;
@@ -245,9 +280,17 @@ function createClientPage() {
 
 function createHttpServer() {
   return http.createServer((req, res) => {
-    if (!ALLOWED_ORIGINS.has(req.headers.origin) && req.headers.origin) {
+    if (!isOriginAllowed(req.headers.origin)) {
       res.writeHead(403);
       res.end("Origin not allowed");
+      return;
+    }
+
+    applyCorsHeaders(req, res);
+
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
       return;
     }
 
@@ -697,6 +740,7 @@ function startServer() {
   const server = createHttpServer();
   socketBridge = attachSocketServer(server, {
     allowedOrigins: ALLOWED_ORIGINS,
+    isOriginAllowed,
     getHealthSnapshot,
     getReaderDevice: () => readerDevice,
     inspectCard,

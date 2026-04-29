@@ -4,6 +4,9 @@
   "description": "NFC Agent App",
   "author": "Fajar",
   "main": "main.js",
+  "engines": {
+    "node": ">=20.17.0"
+  },
   "scripts": {
     "start": "electron .",
     "rebuild": "electron-rebuild -f -w nfc-pcsc",

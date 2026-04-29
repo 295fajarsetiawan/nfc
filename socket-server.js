@@ -3,6 +3,7 @@ const { WebSocketServer } = require("ws");
 function attachSocketServer(server, options) {
   const {
     allowedOrigins,
+    isOriginAllowed: isOriginAllowedOption,
     getHealthSnapshot,
     getReaderDevice,
     inspectCard,
@@ -58,6 +59,10 @@ function attachSocketServer(server, options) {
   }
 
   function isOriginAllowed(origin) {
+    if (typeof isOriginAllowedOption === "function") {
+      return isOriginAllowedOption(origin);
+    }
+
     return !origin || allowedOrigins.has(origin);
   }
 
